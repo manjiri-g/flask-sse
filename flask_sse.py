@@ -5,6 +5,7 @@ from collections import OrderedDict
 from flask import Blueprint, request, current_app, json, stream_with_context
 from redis import StrictRedis
 from redis.exceptions import ConnectionError
+from redis.client import PubSub
 import six
 
 __version__ = '0.2.1'
@@ -158,24 +159,20 @@ class ServerSentEventsBlueprint(Blueprint):
         pubsub.subscribe(channel)
         health_check = ":Connection health-check\n"
         try:
-            for pubsub_message in pubsub.get_message(timeout=15.0):
+            for pubsub_message in pubsub.listen():
 
                 if pubsub_message is None:
                     # If the line starts with a U+003A COLON character (:) Ignore the line,
                     # according to the `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
                     yield health_check
-
                 # pubsub_message['type'] is one of 'subscribe', 'unsubscribe', or 'message'
-                if pubsub_message['type'] == 'message':
+                elif pubsub_message['type'] == 'message':
                     msg_dict = json.loads(pubsub_message['data'])
-
                     command = msg_dict.get('sse-control')
                     if command is None:
                         yield Message(**msg_dict)
-                        continue
                     elif command == 'health-check':
                         yield health_check
-                        continue
                     elif command == 'disconnect':
                         break
         finally:

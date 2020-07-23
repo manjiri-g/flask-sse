@@ -77,7 +77,7 @@ def test_control(bp, app, mockredis):
 def test_messages(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.get_message.return_value = [
+    pubsub.listen.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
@@ -96,7 +96,7 @@ def test_messages(bp, app, mockredis):
 def test_messages_channel(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.get_message.return_value = [
+    pubsub.listen.return_value = [
         {
             "type": "message",
             "data": '{"data": "whee", "id": "abc"}',
@@ -116,7 +116,7 @@ def test_messages_channel(bp, app, mockredis):
 def test_messages_close(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.get_message.return_value = [
+    pubsub.listen.return_value = [
         {
             "type": "message",
             "data": '{"data": "whee", "id": "abc"}',
@@ -137,7 +137,7 @@ def test_messages_close(bp, app, mockredis):
 def test_messages_control(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.get_message.return_value = [
+    pubsub.listen.return_value = [
         {
             "type": "message",
             "data": '{"sse-control": "health-check"}',
@@ -181,7 +181,7 @@ def test_messages_control(bp, app, mockredis):
 def test_messages_timeout(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.get_message.return_value = [
+    pubsub.listen.return_value = [
         None
     ]
 
@@ -197,7 +197,7 @@ def test_messages_timeout(bp, app, mockredis):
 def test_stream(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.get_message.return_value = [
+    pubsub.listen.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
@@ -218,7 +218,7 @@ def test_stream(bp, app, mockredis):
 def test_stream_disconnect(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.get_message.return_value = [
+    pubsub.listen.return_value = [
         {
             "type": "message",
             "data": '{"sse-control": "disconnect"}',
@@ -249,7 +249,7 @@ def test_stream_channel_arg(app, mockredis):
     app.register_blueprint(flask_sse.sse, url_prefix='/stream')
     client = app.test_client()
     pubsub = mockredis.pubsub.return_value
-    pubsub.get_message.return_value = [
+    pubsub.listen.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
@@ -286,7 +286,7 @@ def test_stop_reconnecting_config(bp, app, mockredis):
 def test_stream_stop_reconnecting(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.get_message.return_value = [
+    pubsub.listen.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
