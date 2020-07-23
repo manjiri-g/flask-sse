@@ -251,7 +251,7 @@ class ServerSentEventsBlueprint(Blueprint):
 
         # Tell client to stop reconnecting
         if self.stop_reconnecting(channel):
-            return "", 204
+            return current_app.response_class("", status=204)
 
         @stream_with_context
         def generator():

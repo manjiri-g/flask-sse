@@ -192,3 +192,26 @@ def test_stop_reconnecting_config(bp, app, mockredis):
 
     mockredis.exists.return_value = 1
     assert bp.stop_reconnecting() is False
+
+
+def test_stream_stop_reconnecting(bp, app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    pubsub = mockredis.pubsub.return_value
+    pubsub.get_message.return_value = [
+        {
+            "type": "message",
+            "data": '{"data": "thing", "type": "example"}',
+        }
+    ]
+    app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = ""
+    mockredis.exists.return_value = 0
+
+    resp = bp.stream()
+
+    assert isinstance(resp, flask.Response)
+    assert not resp.is_streamed
+    assert resp.status_code == 204
+    assert resp.content_length == 0
+    output = resp.get_data(as_text=True)
+    assert output == ""
+    pubsub.subscribe.assert_not_called()
