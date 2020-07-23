@@ -93,6 +93,17 @@ class Message(object):
         )
 
 
+def pubsub_messages(pubsub):
+    for pubsub_message in pubsub.listen():
+        yield pubsub_message
+
+
+def pubsub_messages2(pubsub):
+    while True:
+        pubsub_message = pubsub.get_message()
+        yield pubsub_message
+
+
 class ServerSentEventsBlueprint(Blueprint):
     """
     A :class:`flask.Blueprint` subclass that knows how to publish, subscribe to,
@@ -159,8 +170,7 @@ class ServerSentEventsBlueprint(Blueprint):
         pubsub.subscribe(channel)
         health_check = ":Connection health-check\n"
         try:
-            for pubsub_message in pubsub.listen():
-
+            for pubsub_message in pubsub_messages(pubsub):
                 if pubsub_message is None:
                     # If the line starts with a U+003A COLON character (:) Ignore the line,
                     # according to the `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.

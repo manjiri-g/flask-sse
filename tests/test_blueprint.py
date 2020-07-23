@@ -134,45 +134,53 @@ def test_messages_close(bp, app, mockredis):
     pubsub.unsubscribe.assert_called_with('whee')
 
 
-def test_messages_control(bp, app, mockredis):
+def test_messages_control_health_check(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
     pubsub.listen.return_value = [
         {
             "type": "message",
             "data": '{"sse-control": "health-check"}',
-        },
-        {
-            "type": "message",
-            "data": '{"sse-control": "not-supported"}',
-        },
-        {
-            "type": "message",
-            "data": '{"data": "whoo", "id": "abc"}',
-        },
-        {
-            "type": "message",
-            "data": '{"sse-control": "disconnect"}',
-        },
-        {
-            "type": "message",
-            "data": '{"data": "whoo", "id": "efg"}',
-        },
+        }
     ]
 
     gen = bp.messages('whee')
 
     assert isinstance(gen, types.GeneratorType)
-    output = next(gen)
-    assert output == ':Connection health-check\n'
+    output = list(gen)
+    assert output == [':Connection health-check\n']
 
-    pubsub.subscribe.assert_called_with('whee')
-    pubsub.unsubscribe.assert_not_called()
 
-    output = next(gen)
-    assert output == flask_sse.Message('whoo', id='abc')
-    pubsub.unsubscribe.assert_not_called()
+def test_messages_control_not_supported(bp, app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    pubsub = mockredis.pubsub.return_value
+    pubsub.listen.return_value = [
+        {
+            "type": "message",
+            "data": '{"sse-control": "not-supported"}',
+        }
+    ]
 
+    gen = bp.messages('whee')
+
+    assert isinstance(gen, types.GeneratorType)
+    output = list(gen)
+    assert output == []
+
+
+def test_messages_control_disconnect(bp, app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    pubsub = mockredis.pubsub.return_value
+    pubsub.listen.return_value = [
+        {
+            "type": "message",
+            "data": '{"sse-control": "disconnect"}',
+        }
+    ]
+
+    gen = bp.messages('whee')
+
+    assert isinstance(gen, types.GeneratorType)
     with pytest.raises(StopIteration) as excinfo:
         output = next(gen)
     pubsub.unsubscribe.assert_called_with('whee')
