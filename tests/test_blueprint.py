@@ -74,6 +74,32 @@ def test_control(bp, app, mockredis):
     mockredis.publish.assert_called_with(channel='sse', message='{"sse-control": "command"}')
 
 
+def test_pubsub_messages_listen(app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    pubsub = mockredis.pubsub.return_value
+    pubsub.listen.return_value = [
+        'abc'
+    ]
+
+    gen = flask_sse.pubsub_messages(pubsub)
+
+    assert isinstance(gen, types.GeneratorType)
+    output = next(gen)
+    assert output == 'abc'
+
+
+def test_pubsub_messages_get_message(app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    pubsub = mockredis.pubsub.return_value
+    pubsub.get_message.return_value = 'abc'
+
+    gen = flask_sse.pubsub_messages(pubsub, 15.0)
+
+    assert isinstance(gen, types.GeneratorType)
+    output = next(gen)
+    assert output == 'abc'
+
+
 def test_messages(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value

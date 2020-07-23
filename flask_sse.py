@@ -5,7 +5,6 @@ from collections import OrderedDict
 from flask import Blueprint, request, current_app, json, stream_with_context
 from redis import StrictRedis
 from redis.exceptions import ConnectionError
-from redis.client import PubSub
 import six
 
 __version__ = '0.2.1'
@@ -93,15 +92,14 @@ class Message(object):
         )
 
 
-def pubsub_messages(pubsub):
-    for pubsub_message in pubsub.listen():
-        yield pubsub_message
-
-
-def pubsub_messages2(pubsub):
-    while True:
-        pubsub_message = pubsub.get_message()
-        yield pubsub_message
+def pubsub_messages(pubsub, timeout=None):
+    if timeout is None:
+        for pubsub_message in pubsub.listen():
+            yield pubsub_message
+    else:
+        while True:
+            pubsub_message = pubsub.get_message(timeout=timeout)
+            yield pubsub_message
 
 
 class ServerSentEventsBlueprint(Blueprint):
