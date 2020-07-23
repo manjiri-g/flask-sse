@@ -68,6 +68,12 @@ def test_publish_type(bp, app, mockredis):
     )
 
 
+def test_control(bp, app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    bp.control("command")
+    mockredis.publish.assert_called_with(channel='sse', message='{"sse-control": "command"}')
+
+
 def test_messages(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
@@ -128,6 +134,66 @@ def test_messages_close(bp, app, mockredis):
     pubsub.unsubscribe.assert_called_with('whee')
 
 
+def test_messages_control(bp, app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    pubsub = mockredis.pubsub.return_value
+    pubsub.get_message.return_value = [
+        {
+            "type": "message",
+            "data": '{"sse-control": "health-check"}',
+        },
+        {
+            "type": "message",
+            "data": '{"sse-control": "not-supported"}',
+        },
+        {
+            "type": "message",
+            "data": '{"data": "whoo", "id": "abc"}',
+        },
+        {
+            "type": "message",
+            "data": '{"sse-control": "disconnect"}',
+        },
+        {
+            "type": "message",
+            "data": '{"data": "whoo", "id": "efg"}',
+        },
+    ]
+
+    gen = bp.messages('whee')
+
+    assert isinstance(gen, types.GeneratorType)
+    output = next(gen)
+    assert output == ':Connection health-check\n'
+
+    pubsub.subscribe.assert_called_with('whee')
+    pubsub.unsubscribe.assert_not_called()
+
+    output = next(gen)
+    assert output == flask_sse.Message('whoo', id='abc')
+    pubsub.unsubscribe.assert_not_called()
+
+    with pytest.raises(StopIteration) as excinfo:
+        output = next(gen)
+    pubsub.unsubscribe.assert_called_with('whee')
+
+
+def test_messages_timeout(bp, app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    pubsub = mockredis.pubsub.return_value
+    pubsub.get_message.return_value = [
+        None
+    ]
+
+    gen = bp.messages('whee')
+
+    assert isinstance(gen, types.GeneratorType)
+    output = next(gen)
+    assert output == ':Connection health-check\n'
+    pubsub.subscribe.assert_called_with('whee')
+    pubsub.unsubscribe.assert_not_called()
+
+
 def test_stream(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
@@ -146,6 +212,29 @@ def test_stream(bp, app, mockredis):
     output = resp.get_data(as_text=True)
     assert output == "event:example\ndata:thing\n\n"
     pubsub.subscribe.assert_called_with('sse')
+    pubsub.unsubscribe.assert_called_with('sse')
+
+
+def test_stream_disconnect(bp, app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    pubsub = mockredis.pubsub.return_value
+    pubsub.get_message.return_value = [
+        {
+            "type": "message",
+            "data": '{"sse-control": "disconnect"}',
+        }
+    ]
+
+    resp = bp.stream()
+
+    assert isinstance(resp, flask.Response)
+    assert resp.mimetype == "text/event-stream"
+    assert resp.is_streamed
+    assert resp.status_code == 200
+    output = resp.get_data(as_text=True)
+    assert output == ""
+    pubsub.subscribe.assert_called_with('sse')
+    pubsub.unsubscribe.assert_called_with('sse')
 
 
 def test_sse_object():

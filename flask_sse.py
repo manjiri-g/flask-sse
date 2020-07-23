@@ -92,54 +92,6 @@ class Message(object):
         )
 
 
-@six.python_2_unicode_compatible
-class Comment(object):
-    """
-    Comment that is published as a server-sent block that will be ignored
-    as described in <https://www.w3.org/TR/eventsource/>
-    """
-    def __init__(self, data):
-        """
-        Create a server-sent comment.
-
-        :param data: The event data. If it is not a string, it will be
-            serialized to JSON using the Flask application's
-            :class:`~flask.json.JSONEncoder`.
-        """
-        self.data = data
-
-    def to_dict(self):
-        """
-        Serialize this object to a minimal dictionary, for storing in Redis.
-        """
-        d = {"data": self.data, "comment": True}
-        return d
-
-    def __str__(self):
-        """
-        Serialize this object to a string, according to the `server-sent events
-        specification <https://www.w3.org/TR/eventsource/>`_.
-        """
-        if isinstance(self.data, six.string_types):
-            data = self.data
-        else:
-            data = json.dumps(self.data)
-        lines = [":{value}".format(value=line) for line in data.splitlines()]
-        return "\n".join(lines)
-
-    def __repr__(self):
-        return "{classname}({data!r})".format(
-            classname=self.__class__.__name__,
-            data=self.data,
-        )
-
-    def __eq__(self, other):
-        return (
-            isinstance(other, self.__class__) and
-            self.data == other.data
-        )
-
-
 class ServerSentEventsBlueprint(Blueprint):
     """
     A :class:`flask.Blueprint` subclass that knows how to publish, subscribe to,
@@ -178,46 +130,54 @@ class ServerSentEventsBlueprint(Blueprint):
         msg_json = json.dumps(message.to_dict())
         return self.redis.publish(channel=channel, message=msg_json)
 
-    def comment(self, data, channel='sse'):
+    def control(self, command, channel='sse'):
         """
-        Publish data as a server-sent comment.
+        Control the message generator :meth:`messages`
 
-        :param data: The event data. If it is not a string, it will be
-            serialized to JSON using the Flask application's
-            :class:`~flask.json.JSONEncoder`.
+        :param command: E.g. 'disconnect'
         :param channel: If you want to direct different events to different
             clients, you may specify a channel for this event to go to.
             Only clients listening to the same channel will receive this event.
             Defaults to "sse".
         """
-        message = Comment(data)
-        msg_json = json.dumps(message.to_dict())
+        msg_dict = {'sse-control': command}
+        msg_json = json.dumps(msg_dict)
         return self.redis.publish(channel=channel, message=msg_json)
 
     def messages(self, channel='sse'):
         """
         A generator of :class:`~flask_sse.Message` objects from the given channel.
+
+        About SSE connection:
+        Stop reconnecting: See :meth:`stop_reconnecting`. Generator is not invoked.
+        Disconnect: This generator stops with ``StopIteration`` exception. Client may reconnect.
+        Health-check: Sends content which does not fire an event on the client if still connected
+          If client is not connected, this generator closed with ``GeneratorExit`` exception
         """
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
+        health_check = ":Connection health-check\n"
         try:
             for pubsub_message in pubsub.get_message(timeout=15.0):
-                # If the client has disconnected, server can release resources
-                if pubsub_message is None:
-                    yield Comment("Are we still connected?")
 
-                # pubsub_message['type'] is one of 'subscribe', 'unsubscribe', or 'message' 
+                if pubsub_message is None:
+                    # If the line starts with a U+003A COLON character (:) Ignore the line,
+                    # according to the `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
+                    yield health_check
+
+                # pubsub_message['type'] is one of 'subscribe', 'unsubscribe', or 'message'
                 if pubsub_message['type'] == 'message':
                     msg_dict = json.loads(pubsub_message['data'])
 
-                    # Server would like to disconnect
-                    if msg_dict.get('disconnect'):
-                        return
-
-                    if msg_dict.get('comment'):
-                        yield Comment(**msg_dict)
-                    else:
+                    command = msg_dict.get('sse-control')
+                    if command is None:
                         yield Message(**msg_dict)
+                        continue
+                    elif command == 'health-check':
+                        yield health_check
+                        continue
+                    elif command == 'disconnect':
+                        break
         finally:
             try:
                 pubsub.unsubscribe(channel)
@@ -226,9 +186,12 @@ class ServerSentEventsBlueprint(Blueprint):
 
     def stop_reconnecting(self, channel='sse'):
         """
-        Clients will reconnect if the connection is closed; a client can be told to stop reconnecting 
-        using the HTTP 204 No Content response code, according to the `server-sent events
-        specification <https://www.w3.org/TR/eventsource/>`_.
+        Tell client to stop reconnecting if a redis key exists. This functionality is enabled
+        with SSE_REDIS_CHANNEL_KEY_PREFIX configuration.
+
+        Clients will reconnect if the connection is closed;
+        a client can be told to stop reconnecting using the HTTP 204 No Content response code,
+        according to the `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
 
         Subclasses can override this to return True if the client should stop reconnecting
         """
@@ -238,7 +201,7 @@ class ServerSentEventsBlueprint(Blueprint):
 
         # stop reconnecting if key does not exist
         key = prefix + channel
-        return not bool(self.redis.exists(key))
+        return not self.redis.exists(key)
 
     def stream(self):
         """
