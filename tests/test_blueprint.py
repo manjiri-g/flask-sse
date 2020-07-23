@@ -71,7 +71,7 @@ def test_publish_type(bp, app, mockredis):
 def test_messages(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    pubsub.get_message.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
@@ -90,7 +90,7 @@ def test_messages(bp, app, mockredis):
 def test_messages_channel(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    pubsub.get_message.return_value = [
         {
             "type": "message",
             "data": '{"data": "whee", "id": "abc"}',
@@ -110,7 +110,7 @@ def test_messages_channel(bp, app, mockredis):
 def test_messages_close(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    pubsub.get_message.return_value = [
         {
             "type": "message",
             "data": '{"data": "whee", "id": "abc"}',
@@ -131,7 +131,7 @@ def test_messages_close(bp, app, mockredis):
 def test_stream(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    pubsub.get_message.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
@@ -160,7 +160,7 @@ def test_stream_channel_arg(app, mockredis):
     app.register_blueprint(flask_sse.sse, url_prefix='/stream')
     client = app.test_client()
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    pubsub.get_message.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
@@ -175,3 +175,20 @@ def test_stream_channel_arg(app, mockredis):
     output = resp.get_data(as_text=True)
     assert output == "event:example\ndata:thing\n\n"
     pubsub.subscribe.assert_called_with('different')
+
+
+def test_stop_reconnecting_no_config(bp, app):
+    assert bp.stop_reconnecting() is False
+
+
+def test_stop_reconnecting_config(bp, app, mockredis):
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    prefix = "prefix:"
+    app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = prefix
+
+    mockredis.exists.return_value = 0
+    assert bp.stop_reconnecting() is True
+    mockredis.exists.assert_called_with(prefix + 'sse')
+
+    mockredis.exists.return_value = 1
+    assert bp.stop_reconnecting() is False

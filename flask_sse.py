@@ -92,6 +92,54 @@ class Message(object):
         )
 
 
+@six.python_2_unicode_compatible
+class Comment(object):
+    """
+    Comment that is published as a server-sent block that will be ignored
+    as described in <https://www.w3.org/TR/eventsource/>
+    """
+    def __init__(self, data):
+        """
+        Create a server-sent comment.
+
+        :param data: The event data. If it is not a string, it will be
+            serialized to JSON using the Flask application's
+            :class:`~flask.json.JSONEncoder`.
+        """
+        self.data = data
+
+    def to_dict(self):
+        """
+        Serialize this object to a minimal dictionary, for storing in Redis.
+        """
+        d = {"data": self.data, "comment": True}
+        return d
+
+    def __str__(self):
+        """
+        Serialize this object to a string, according to the `server-sent events
+        specification <https://www.w3.org/TR/eventsource/>`_.
+        """
+        if isinstance(self.data, six.string_types):
+            data = self.data
+        else:
+            data = json.dumps(self.data)
+        lines = [":{value}".format(value=line) for line in data.splitlines()]
+        return "\n".join(lines)
+
+    def __repr__(self):
+        return "{classname}({data!r})".format(
+            classname=self.__class__.__name__,
+            data=self.data,
+        )
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, self.__class__) and
+            self.data == other.data
+        )
+
+
 class ServerSentEventsBlueprint(Blueprint):
     """
     A :class:`flask.Blueprint` subclass that knows how to publish, subscribe to,
@@ -130,6 +178,22 @@ class ServerSentEventsBlueprint(Blueprint):
         msg_json = json.dumps(message.to_dict())
         return self.redis.publish(channel=channel, message=msg_json)
 
+    def comment(self, data, channel='sse'):
+        """
+        Publish data as a server-sent comment.
+
+        :param data: The event data. If it is not a string, it will be
+            serialized to JSON using the Flask application's
+            :class:`~flask.json.JSONEncoder`.
+        :param channel: If you want to direct different events to different
+            clients, you may specify a channel for this event to go to.
+            Only clients listening to the same channel will receive this event.
+            Defaults to "sse".
+        """
+        message = Comment(data)
+        msg_json = json.dumps(message.to_dict())
+        return self.redis.publish(channel=channel, message=msg_json)
+
     def messages(self, channel='sse'):
         """
         A generator of :class:`~flask_sse.Message` objects from the given channel.
@@ -137,15 +201,44 @@ class ServerSentEventsBlueprint(Blueprint):
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
         try:
-            for pubsub_message in pubsub.listen():
+            for pubsub_message in pubsub.get_message(timeout=15.0):
+                # If the client has disconnected, server can release resources
+                if pubsub_message is None:
+                    yield Comment("Are we still connected?")
+
+                # pubsub_message['type'] is one of 'subscribe', 'unsubscribe', or 'message' 
                 if pubsub_message['type'] == 'message':
                     msg_dict = json.loads(pubsub_message['data'])
-                    yield Message(**msg_dict)
+
+                    # Server would like to disconnect
+                    if msg_dict.get('disconnect'):
+                        return
+
+                    if msg_dict.get('comment'):
+                        yield Comment(**msg_dict)
+                    else:
+                        yield Message(**msg_dict)
         finally:
             try:
                 pubsub.unsubscribe(channel)
             except ConnectionError:
                 pass
+
+    def stop_reconnecting(self, channel='sse'):
+        """
+        Clients will reconnect if the connection is closed; a client can be told to stop reconnecting 
+        using the HTTP 204 No Content response code, according to the `server-sent events
+        specification <https://www.w3.org/TR/eventsource/>`_.
+
+        Subclasses can override this to return True if the client should stop reconnecting
+        """
+        prefix = current_app.config.get("SSE_REDIS_CHANNEL_KEY_PREFIX")
+        if prefix is None:
+            return False
+
+        # stop reconnecting if key does not exist
+        key = prefix + channel
+        return not bool(self.redis.exists(key))
 
     def stream(self):
         """
@@ -155,6 +248,10 @@ class ServerSentEventsBlueprint(Blueprint):
         channel than the default channel (which is "sse").
         """
         channel = request.args.get('channel') or 'sse'
+
+        # Tell client to stop reconnecting
+        if self.stop_reconnecting(channel):
+            return "", 204
 
         @stream_with_context
         def generator():
