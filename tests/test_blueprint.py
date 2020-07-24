@@ -4,6 +4,7 @@ import redis
 import types
 import flask
 
+
 pytestmark = pytest.mark.usefixtures("appctx")
 
 
@@ -81,7 +82,7 @@ def test_pubsub_messages_listen(app, mockredis):
         'abc'
     ]
 
-    gen = flask_sse.pubsub_messages(pubsub)
+    gen = flask_sse.pubsub_messages(pubsub, timeout=None)
 
     assert isinstance(gen, types.GeneratorType)
     output = next(gen)
@@ -93,17 +94,17 @@ def test_pubsub_messages_get_message(app, mockredis):
     pubsub = mockredis.pubsub.return_value
     pubsub.get_message.return_value = 'abc'
 
-    gen = flask_sse.pubsub_messages(pubsub, 15.0)
+    gen = flask_sse.pubsub_messages(pubsub, timeout=15.0)
 
     assert isinstance(gen, types.GeneratorType)
     output = next(gen)
     assert output == 'abc'
 
 
-def test_messages(bp, app, mockredis):
+def test_messages(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
@@ -113,16 +114,16 @@ def test_messages(bp, app, mockredis):
     gen = bp.messages()
 
     assert isinstance(gen, types.GeneratorType)
-    output = list(gen)
-    assert output == [flask_sse.Message("thing", type="example")]
+    output = next(gen)
+    assert output == flask_sse.Message("thing", type="example")
     pubsub.subscribe.assert_called_with('sse')
-    pubsub.unsubscribe.assert_called_with('sse')
+    # pubsub.unsubscribe.assert_called_with('sse')
 
 
-def test_messages_channel(bp, app, mockredis):
+def test_messages_channel(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"data": "whee", "id": "abc"}',
@@ -133,16 +134,16 @@ def test_messages_channel(bp, app, mockredis):
     gen = bp.messages('whee')
 
     assert isinstance(gen, types.GeneratorType)
-    output = list(gen)
-    assert output == [flask_sse.Message("whee", id="abc")]
+    output = next(gen)
+    assert output == flask_sse.Message("whee", id="abc")
     pubsub.subscribe.assert_called_with('whee')
-    pubsub.unsubscribe.assert_called_with('whee')
+    # pubsub.unsubscribe.assert_called_with('whee')
 
 
-def test_messages_close(bp, app, mockredis):
+def test_messages_close(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"data": "whee", "id": "abc"}',
@@ -160,10 +161,10 @@ def test_messages_close(bp, app, mockredis):
     pubsub.unsubscribe.assert_called_with('whee')
 
 
-def test_messages_control_health_check(bp, app, mockredis):
+def test_messages_control_health_check(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"sse-control": "health-check"}',
@@ -173,31 +174,30 @@ def test_messages_control_health_check(bp, app, mockredis):
     gen = bp.messages('whee')
 
     assert isinstance(gen, types.GeneratorType)
-    output = list(gen)
-    assert output == [':Connection health-check\n']
+    output = next(gen)
+    assert output == ':Connection health-check\n'
 
 
-def test_messages_control_not_supported(bp, app, mockredis):
-    app.config["SSE_REDIS_URL"] = "redis://localhost"
-    pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+def test_messages_control_not_supported(bp, app, mockredis, mocker):
+    psm = mocker.patch('flask_sse.pubsub_messages')
+    psm.return_value = [
         {
             "type": "message",
             "data": '{"sse-control": "not-supported"}',
         }
     ]
-
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
     gen = bp.messages('whee')
 
     assert isinstance(gen, types.GeneratorType)
-    output = list(gen)
-    assert output == []
+    with pytest.raises(StopIteration) as excinfo:
+        output = next(gen)
 
 
-def test_messages_control_disconnect(bp, app, mockredis):
+def test_messages_control_disconnect(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"sse-control": "disconnect"}',
@@ -212,10 +212,10 @@ def test_messages_control_disconnect(bp, app, mockredis):
     pubsub.unsubscribe.assert_called_with('whee')
 
 
-def test_messages_timeout(bp, app, mockredis):
+def test_messages_timeout(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         None
     ]
 
@@ -228,10 +228,10 @@ def test_messages_timeout(bp, app, mockredis):
     pubsub.unsubscribe.assert_not_called()
 
 
-def test_stream(bp, app, mockredis):
+def test_stream(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
@@ -249,10 +249,10 @@ def test_stream(bp, app, mockredis):
     pubsub.unsubscribe.assert_called_with('sse')
 
 
-def test_stream_disconnect(bp, app, mockredis):
+def test_stream_disconnect(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"sse-control": "disconnect"}',
@@ -278,12 +278,12 @@ def test_sse_object():
     assert len(flask_sse.sse.deferred_functions) == 1
 
 
-def test_stream_channel_arg(app, mockredis):
+def test_stream_channel_arg(app, mockredis, mockpsmsgs):
     app.config["REDIS_URL"] = "redis://localhost"
     app.register_blueprint(flask_sse.sse, url_prefix='/stream')
     client = app.test_client()
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',
@@ -304,7 +304,7 @@ def test_stop_reconnecting_no_config(bp, app):
     assert bp.stop_reconnecting() is False
 
 
-def test_stop_reconnecting_config(bp, app, mockredis):
+def test_stop_reconnecting_config(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     prefix = "prefix:"
     app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = prefix
@@ -317,10 +317,10 @@ def test_stop_reconnecting_config(bp, app, mockredis):
     assert bp.stop_reconnecting() is False
 
 
-def test_stream_stop_reconnecting(bp, app, mockredis):
+def test_stream_stop_reconnecting(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
-    pubsub.listen.return_value = [
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"data": "thing", "type": "example"}',

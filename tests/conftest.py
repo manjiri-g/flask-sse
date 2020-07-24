@@ -20,9 +20,15 @@ def appctx(app):
     with app.test_request_context("/") as ctx:
         yield ctx
 
+
 @pytest.fixture
 def mockredis(mocker):
     _mr = mocker.Mock(name="mockredis")
     mocker.patch("flask_sse.StrictRedis", return_value=_mr)
     mocker.patch("flask_sse.StrictRedis.from_url", return_value=_mr)
     return _mr
+
+
+@pytest.fixture
+def mockpsmsgs(mocker):
+    return mocker.patch("flask_sse.pubsub_messages")

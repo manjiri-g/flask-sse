@@ -92,7 +92,7 @@ class Message(object):
         )
 
 
-def pubsub_messages(pubsub, timeout=None):
+def pubsub_messages(pubsub, timeout=10.0):
     if timeout is None:
         for pubsub_message in pubsub.listen():
             yield pubsub_message
