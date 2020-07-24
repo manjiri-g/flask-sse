@@ -166,12 +166,14 @@ class ServerSentEventsBlueprint(Blueprint):
         """
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
+
+        # If the line starts with a U+003A COLON character (:) Ignore the line, according to the
+        # `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
         health_check = ":Connection health-check\n"
+
         try:
             for pubsub_message in pubsub_messages(pubsub):
                 if pubsub_message is None:
-                    # If the line starts with a U+003A COLON character (:) Ignore the line,
-                    # according to the `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
                     yield health_check
                 # pubsub_message['type'] is one of 'subscribe', 'unsubscribe', or 'message'
                 elif pubsub_message['type'] == 'message':
