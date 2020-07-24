@@ -1,5 +1,6 @@
 import pytest
 from flask import Flask
+import flask_sse
 
 
 @pytest.fixture
@@ -31,4 +32,4 @@ def mockredis(mocker):
 
 @pytest.fixture
 def mockpsmsgs(mocker):
-    return mocker.patch("flask_sse.pubsub_messages")
+    return mocker.patch.object(flask_sse.ServerSentEventsBlueprint, "pubsub_messages")

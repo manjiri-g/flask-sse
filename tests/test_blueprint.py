@@ -82,7 +82,7 @@ def test_pubsub_messages_listen(app, mockredis):
         'abc'
     ]
 
-    gen = flask_sse.pubsub_messages(pubsub, timeout=None)
+    gen = flask_sse.ServerSentEventsBlueprint.pubsub_messages(pubsub, timeout=None)
 
     assert isinstance(gen, types.GeneratorType)
     output = next(gen)
@@ -94,7 +94,7 @@ def test_pubsub_messages_get_message(app, mockredis):
     pubsub = mockredis.pubsub.return_value
     pubsub.get_message.return_value = 'abc'
 
-    gen = flask_sse.pubsub_messages(pubsub, timeout=15.0)
+    gen = flask_sse.ServerSentEventsBlueprint.pubsub_messages(pubsub, timeout=15.0)
 
     assert isinstance(gen, types.GeneratorType)
     output = next(gen)
@@ -178,9 +178,8 @@ def test_messages_control_health_check(bp, app, mockredis, mockpsmsgs):
     assert output == ':Connection health-check\n'
 
 
-def test_messages_control_not_supported(bp, app, mockredis, mocker):
-    psm = mocker.patch('flask_sse.pubsub_messages')
-    psm.return_value = [
+def test_messages_control_not_supported(bp, app, mockredis, mockpsmsgs):
+    mockpsmsgs.return_value = [
         {
             "type": "message",
             "data": '{"sse-control": "not-supported"}',
@@ -214,18 +213,26 @@ def test_messages_control_disconnect(bp, app, mockredis, mockpsmsgs):
 
 def test_messages_timeout(bp, app, mockredis, mockpsmsgs):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
+    app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = ""
     pubsub = mockredis.pubsub.return_value
     mockpsmsgs.return_value = [
+        None,
         None
     ]
 
     gen = bp.messages('whee')
-
     assert isinstance(gen, types.GeneratorType)
+
+    mockredis.exists.return_value = 1
     output = next(gen)
     assert output == ':Connection health-check\n'
     pubsub.subscribe.assert_called_with('whee')
     pubsub.unsubscribe.assert_not_called()
+
+    mockredis.exists.return_value = 0
+    with pytest.raises(StopIteration) as excinfo:
+        output = next(gen)
+    pubsub.unsubscribe.assert_called_with('whee')
 
 
 def test_stream(bp, app, mockredis, mockpsmsgs):

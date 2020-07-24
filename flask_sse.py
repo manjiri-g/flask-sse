@@ -92,16 +92,6 @@ class Message(object):
         )
 
 
-def pubsub_messages(pubsub, timeout=10.0):
-    if timeout is None:
-        for pubsub_message in pubsub.listen():
-            yield pubsub_message
-    else:
-        while True:
-            pubsub_message = pubsub.get_message(timeout=timeout)
-            yield pubsub_message
-
-
 class ServerSentEventsBlueprint(Blueprint):
     """
     A :class:`flask.Blueprint` subclass that knows how to publish, subscribe to,
@@ -154,6 +144,20 @@ class ServerSentEventsBlueprint(Blueprint):
         msg_json = json.dumps(msg_dict)
         return self.redis.publish(channel=channel, message=msg_json)
 
+    @staticmethod
+    def pubsub_messages(pubsub, timeout=15.0):
+        """
+        Block (unless timeout=0.0) until message is published on subscribed channel.
+        Yield message or 'None' on timeout.
+        """
+        if timeout is None:
+            for pubsub_message in pubsub.listen():
+                yield pubsub_message
+        else:
+            while True:
+                pubsub_message = pubsub.get_message(timeout=timeout)
+                yield pubsub_message
+
     def messages(self, channel='sse'):
         """
         A generator of :class:`~flask_sse.Message` objects from the given channel.
@@ -172,11 +176,13 @@ class ServerSentEventsBlueprint(Blueprint):
         health_check = ":Connection health-check\n"
 
         try:
-            for pubsub_message in pubsub_messages(pubsub):
+            for pubsub_message in self.pubsub_messages(pubsub):
                 if pubsub_message is None:
-                    yield health_check
-                # pubsub_message['type'] is one of 'subscribe', 'unsubscribe', or 'message'
-                elif pubsub_message['type'] == 'message':
+                    if self.stop_reconnecting(channel):
+                        break
+                    else:
+                        yield health_check
+                elif pubsub_message['type'] == 'message':  # ignore 'subscribe' 'unsubscribe'
                     msg_dict = json.loads(pubsub_message['data'])
                     command = msg_dict.get('sse-control')
                     if command is None:
