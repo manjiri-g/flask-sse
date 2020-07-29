@@ -14,6 +14,14 @@ def bp(app):
     return _bp
 
 
+def finite_stream(mocker, N=1):
+    # By default, the message generator is never done streaming. For testing purposes, this patch
+    # stops the generator after yielding N messages. First 2 calls are made before looping begins.
+    # A message is yielded after the 3rd call. The last call terminates the loop.
+    mocker.patch("flask_sse.ServerSentEventsBlueprint.done_streaming",
+                 side_effect=[None, None] + [None] * N + [True])
+
+
 def test_no_redis_configured(bp):
     with pytest.raises(KeyError) as excinfo:
         bp.redis
@@ -193,11 +201,9 @@ def test_messages_control_disconnect(bp, app, mockredis):
     pubsub.unsubscribe.assert_called_with('whee')
 
 
-def test_done_streaming_no_config(bp, app):
+def test_done_streaming_config(bp, app, mockredis):
     assert bp.done_streaming() is None
 
-
-def test_done_streaming_config(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     prefix = "prefix:"
     app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = prefix
@@ -212,9 +218,12 @@ def test_done_streaming_config(bp, app, mockredis):
 
 def test_messages_done_streaming(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
-    app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = ""
     pubsub = mockredis.pubsub.return_value
     pubsub.get_message.side_effect = [
+        {
+            "type": "message",
+            "data": '{"data": "whee", "id": "0"}',
+        },
         {
             "type": "message",
             "data": '{"data": "whee", "id": "1"}',
@@ -227,19 +236,28 @@ def test_messages_done_streaming(bp, app, mockredis):
 
     gen = bp.messages('whee')
 
+    mockredis.exists.return_value = 0
+    output = next(gen)
+    assert output == flask_sse.Message("whee", id="0").to_str()
+    pubsub.unsubscribe.assert_not_called()
+    assert pubsub.get_message.call_count == 1
+
+    app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = ""
+
     mockredis.exists.return_value = 1
     output = next(gen)
     assert output == flask_sse.Message("whee", id="1").to_str()
     pubsub.unsubscribe.assert_not_called()
+    assert pubsub.get_message.call_count == 2
 
     mockredis.exists.return_value = 0
     with pytest.raises(StopIteration):
         next(gen)
     pubsub.unsubscribe.assert_called_with('whee')
-    pubsub.get_message.assert_called_once()
+    assert pubsub.get_message.call_count == 2
 
 
-def test_messages_timeout_default(bp, app, mockredis):
+def test_messages_timeout_default_config(bp, app, mockredis):
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     pubsub = mockredis.pubsub.return_value
     pubsub.get_message.side_effect = [
@@ -297,10 +315,9 @@ def test_messages_timeout_health_check(bp, app, mockredis):
     pubsub.get_message.assert_called_with(timeout=15.0)
 
 
-def test_stream(bp, app, mockredis):
+def test_stream(bp, app, mockredis, mocker):
+    finite_stream(mocker)
     app.config["SSE_REDIS_URL"] = "redis://localhost"
-    # app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = ""
-    # mockredis.exists.side_effect = [1, 1, 1, 0]
     pubsub = mockredis.pubsub.return_value
     pubsub.get_message.return_value = {
         "type": "message",
@@ -366,10 +383,9 @@ def test_sse_object():
     assert len(flask_sse.sse.deferred_functions) == 1
 
 
-def test_stream_channel_arg(app, mockredis):
+def test_stream_channel_arg(app, mockredis, mocker):
+    finite_stream(mocker)
     app.config["REDIS_URL"] = "redis://localhost"
-    app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = ""
-    mockredis.exists.side_effect = [1, 1, 1, 0]
     app.register_blueprint(flask_sse.sse, url_prefix='/stream')
     client = app.test_client()
     pubsub = mockredis.pubsub.return_value
