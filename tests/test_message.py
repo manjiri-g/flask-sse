@@ -10,9 +10,9 @@ def test_empty_message():
 def test_simple_data():
     m = Message("foo")
     assert m.data == "foo"
-    assert m.type == None
-    assert m.id == None
-    assert m.retry == None
+    assert m.type is None
+    assert m.id is None
+    assert m.retry is None
 
     assert m.to_dict() == {"data": "foo"}
     assert repr(m) == "Message('foo')"
@@ -22,9 +22,9 @@ def test_simple_data():
 def test_data_dict():
     m = Message({"message": "Hello!"})
     assert m.data == {"message": "Hello!"}
-    assert m.type == None
-    assert m.id == None
-    assert m.retry == None
+    assert m.type is None
+    assert m.id is None
+    assert m.retry is None
 
     assert m.to_dict() == {"data": {"message": "Hello!"}}
     assert repr(m) == "Message({'message': 'Hello!'})"
@@ -34,9 +34,9 @@ def test_data_dict():
 def test_multiline_data():
     m = Message("foo\nbar")
     assert m.data == "foo\nbar"
-    assert m.type == None
-    assert m.id == None
-    assert m.retry == None
+    assert m.type is None
+    assert m.id is None
+    assert m.retry is None
 
     assert m.to_dict() == {"data": "foo\nbar"}
     assert repr(m) == "Message('foo\\nbar')"
