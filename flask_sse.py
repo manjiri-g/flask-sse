@@ -46,9 +46,9 @@ class Message(object):
             d["retry"] = self.retry
         return d
 
-    def to_str(self):
+    def block(self):
         """
-        Serialize this object as a server-sent block
+        Serialize this object as a server-sent block of lines
         """
         return str(self)
 
@@ -98,7 +98,7 @@ class Message(object):
         )
 
 
-class ServerSentEventsBlueprint(Blueprint):
+class ServerSentEventsBaseBlueprint(Blueprint):
     """
     A :class:`flask.Blueprint` subclass that knows how to publish, subscribe to,
     and stream server-sent events.
@@ -116,6 +116,79 @@ class ServerSentEventsBlueprint(Blueprint):
             raise KeyError("Must set a redis connection URL in app config.")
         return StrictRedis.from_url(redis_url)
 
+    def publish(self, data, type=None, id=None, retry=None, channel='sse'):
+        """
+        Publish data as a server-sent event.
+
+        :param data: The event data. If it is not a string, it will be
+            serialized to JSON using the Flask application's
+            :class:`~flask.json.JSONEncoder`.
+        :param type: An optional event type.
+        :param id: An optional event ID.
+        :param retry: An optional integer, to specify the reconnect time for
+            disconnected clients of this stream.
+        :param channel: If you want to direct different events to different
+            clients, you may specify a channel for this event to go to.
+            Only clients listening to the same channel will receive this event.
+            Defaults to "sse".
+        """
+        message = Message(data, type=type, id=id, retry=retry)
+        msg_json = json.dumps(message.to_dict())
+        return self.redis.publish(channel=channel, message=msg_json)
+
+    def messages(self, channel='sse'):
+        """
+        A generator of :class:`~flask_sse.Message` objects from the given channel.
+        """
+        pubsub = self.redis.pubsub()
+        pubsub.subscribe(channel)
+        try:
+            for pubsub_message in pubsub.listen():
+                if pubsub_message['type'] == 'message':
+                    msg_dict = json.loads(pubsub_message['data'])
+                    yield Message(**msg_dict)
+        finally:
+            try:
+                pubsub.unsubscribe(channel)
+            except ConnectionError:
+                pass
+
+    def stream(self):
+        """
+        A view function that streams server-sent events. Ignores any
+        :mailheader:`Last-Event-ID` headers in the HTTP request.
+        Use a "channel" query parameter to stream events from a different
+        channel than the default channel (which is "sse").
+        """
+        channel = request.args.get('channel') or 'sse'
+
+        @stream_with_context
+        def generator():
+            for message in self.messages(channel=channel):
+                yield str(message)
+
+        return current_app.response_class(
+            generator(),
+            mimetype='text/event-stream',
+        )
+
+
+ssebase = ServerSentEventsBaseBlueprint('ssebase', __name__)
+"""
+An instance of :class:`~flask_sse.ServerSentEventsBaseBlueprint`
+that hooks up the :meth:`~flask_sse.ServerSentEventsBaseBlueprint.stream`
+method as a view function at the root of the blueprint. If you don't
+want to customize this blueprint at all, you can simply import and
+use this instance in your application.
+"""
+ssebase.add_url_rule(rule="", endpoint="basestream", view_func=ssebase.stream)
+
+
+class ServerSentEventsBlueprint(ServerSentEventsBaseBlueprint):
+    """
+    A :class:`flask_sse.ServerSentEventsBaseBlueprint` subclass that provides mechanisms to control
+    server-sent events stream and connection.
+    """
     def done_streaming(self, channel='sse'):
         """
         Done streaming on this channel if a redis key does not exist.
@@ -143,29 +216,9 @@ class ServerSentEventsBlueprint(Blueprint):
         msg_json = json.dumps(msg_dict)
         return self.redis.publish(channel=channel, message=msg_json)
 
-    def publish(self, data, type=None, id=None, retry=None, channel='sse'):
+    def blocks(self, channel='sse'):
         """
-        Publish data as a server-sent event.
-
-        :param data: The event data. If it is not a string, it will be
-            serialized to JSON using the Flask application's
-            :class:`~flask.json.JSONEncoder`.
-        :param type: An optional event type.
-        :param id: An optional event ID.
-        :param retry: An optional integer, to specify the reconnect time for
-            disconnected clients of this stream.
-        :param channel: If you want to direct different events to different
-            clients, you may specify a channel for this event to go to.
-            Only clients listening to the same channel will receive this event.
-            Defaults to "sse".
-        """
-        message = Message(data, type=type, id=id, retry=retry)
-        msg_json = json.dumps(message.to_dict())
-        return self.redis.publish(channel=channel, message=msg_json)
-
-    def messages(self, channel='sse'):
-        """
-        A generator of streaming blocks from the given channel
+        A generator of streaming blocks of lines from the given channel
           Yields serialized :class:`~flask_sse.Message` objects published to the given channel.
             See :meth:`publish`. This will fire an SSEvent.
           Yields a health-check on timeout. This functionality is enabled with SSE_HEALTH_CHECK
@@ -199,7 +252,7 @@ class ServerSentEventsBlueprint(Blueprint):
                     msg_dict = json.loads(pubsub_message['data'])
                     command = msg_dict.get('sse-control')
                     if command is None:
-                        yield Message(**msg_dict).to_str()
+                        yield Message(**msg_dict).block()
                     elif command == 'health-check':
                         if health_check:
                             yield health_check
@@ -228,8 +281,8 @@ class ServerSentEventsBlueprint(Blueprint):
 
         @stream_with_context
         def generator():
-            for message in self.messages(channel=channel):
-                yield message
+            for block in self.blocks(channel=channel):
+                yield block
 
         return current_app.response_class(
             generator(),

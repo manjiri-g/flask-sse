@@ -93,11 +93,11 @@ def test_messages(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages()
+    gen = bp.blocks()
 
     assert isinstance(gen, types.GeneratorType)
     output = next(gen)
-    assert output == flask_sse.Message("thing", type="example").to_str()
+    assert output == flask_sse.Message("thing", type="example").block()
     pubsub.subscribe.assert_called_with('sse')
 
 
@@ -111,11 +111,11 @@ def test_messages_channel(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
 
     assert isinstance(gen, types.GeneratorType)
     output = next(gen)
-    assert output == flask_sse.Message("whee", id="abc").to_str()
+    assert output == flask_sse.Message("whee", id="abc").block()
     pubsub.subscribe.assert_called_with('whee')
 
 
@@ -129,10 +129,10 @@ def test_messages_close(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
 
     output = next(gen)
-    assert output == flask_sse.Message("whee", id="abc").to_str()
+    assert output == flask_sse.Message("whee", id="abc").block()
     pubsub.subscribe.assert_called_with('whee')
     pubsub.unsubscribe.assert_not_called()
     gen.close()
@@ -148,11 +148,11 @@ def test_messages_redis_connection_error(bp, app, mockredis):
         redis.exceptions.ConnectionError()
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
     with pytest.raises(Exception, match="Redis uncaught[12]"):
         next(gen)
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
     with pytest.raises(Exception, match="Redis uncaught1"):
         next(gen)
 
@@ -171,9 +171,9 @@ def test_messages_control_not_supported(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
     output = next(gen)
-    assert output == flask_sse.Message("whee", id="abc").to_str()
+    assert output == flask_sse.Message("whee", id="abc").block()
 
 
 def test_messages_control_health_check(bp, app, mockredis):
@@ -187,7 +187,7 @@ def test_messages_control_health_check(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
 
     output = next(gen)
     assert output == ':HC\n'
@@ -203,7 +203,7 @@ def test_messages_control_disconnect(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
 
     with pytest.raises(StopIteration):
         output = next(gen)
@@ -243,11 +243,11 @@ def test_messages_done_streaming(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
 
     mockredis.exists.return_value = 1
     output = next(gen)
-    assert output == flask_sse.Message("whee", id="1").to_str()
+    assert output == flask_sse.Message("whee", id="1").block()
     pubsub.unsubscribe.assert_not_called()
     assert pubsub.get_message.call_count == 1
 
@@ -269,10 +269,10 @@ def test_messages_timeout_default_config(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
 
     output = next(gen)
-    assert output == flask_sse.Message("whee", id="abc").to_str()
+    assert output == flask_sse.Message("whee", id="abc").block()
     pubsub.get_message.assert_called_with(timeout=None)
 
 
@@ -287,10 +287,10 @@ def test_messages_timeout_done_streaming_never(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
 
     output = next(gen)
-    assert output == flask_sse.Message("whee", id="abc").to_str()
+    assert output == flask_sse.Message("whee", id="abc").block()
     pubsub.get_message.assert_called_with(timeout=None)
     pubsub.unsubscribe.assert_not_called()
 
@@ -307,10 +307,10 @@ def test_messages_timeout_done_streaming_not(bp, app, mockredis):
             "data": '{"data": "whee", "id": "abc"}',
         }
     ]
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
 
     output = next(gen)
-    assert output == flask_sse.Message("whee", id="abc").to_str()
+    assert output == flask_sse.Message("whee", id="abc").block()
     pubsub.get_message.assert_called_with(timeout=15.0)
     pubsub.unsubscribe.assert_not_called()
 
@@ -327,7 +327,7 @@ def test_messages_timeout_health_check(bp, app, mockredis):
         }
     ]
 
-    gen = bp.messages('whee')
+    gen = bp.blocks('whee')
 
     output = next(gen)
     assert output == ':\n'
