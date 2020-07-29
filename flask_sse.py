@@ -116,6 +116,33 @@ class ServerSentEventsBlueprint(Blueprint):
             raise KeyError("Must set a redis connection URL in app config.")
         return StrictRedis.from_url(redis_url)
 
+    def done_streaming(self, channel='sse'):
+        """
+        Done streaming on this channel if a redis key does not exist.
+        This functionality is enabled with SSE_REDIS_CHANNEL_KEY_PREFIX configuration.
+        """
+        prefix = current_app.config.get("SSE_REDIS_CHANNEL_KEY_PREFIX")
+        if prefix is None:
+            return None  # never done streaming
+
+        key = prefix + channel
+        return not self.redis.exists(key)  # not done streaming if key exists
+
+    def control(self, command, channel='sse'):
+        """
+        Control the message generator :meth:`messages` by publishing a message.
+        (This is not sent to client).
+
+        :param command: E.g. 'disconnect'
+        :param channel: If you want to direct different events to different
+            clients, you may specify a channel for this event to go to.
+            Only clients listening to the same channel will receive this event.
+            Defaults to "sse".
+        """
+        msg_dict = {'sse-control': command}
+        msg_json = json.dumps(msg_dict)
+        return self.redis.publish(channel=channel, message=msg_json)
+
     def publish(self, data, type=None, id=None, retry=None, channel='sse'):
         """
         Publish data as a server-sent event.
@@ -135,32 +162,6 @@ class ServerSentEventsBlueprint(Blueprint):
         message = Message(data, type=type, id=id, retry=retry)
         msg_json = json.dumps(message.to_dict())
         return self.redis.publish(channel=channel, message=msg_json)
-
-    def control(self, command, channel='sse'):
-        """
-        Control the message generator :meth:`messages`
-
-        :param command: E.g. 'disconnect'
-        :param channel: If you want to direct different events to different
-            clients, you may specify a channel for this event to go to.
-            Only clients listening to the same channel will receive this event.
-            Defaults to "sse".
-        """
-        msg_dict = {'sse-control': command}
-        msg_json = json.dumps(msg_dict)
-        return self.redis.publish(channel=channel, message=msg_json)
-
-    def done_streaming(self, channel='sse'):
-        """
-        Done streaming on this channel if a redis key does not exist.
-        This functionality is enabled with SSE_REDIS_CHANNEL_KEY_PREFIX configuration.
-        """
-        prefix = current_app.config.get("SSE_REDIS_CHANNEL_KEY_PREFIX")
-        if prefix is None:
-            return None  # never done streaming
-
-        key = prefix + channel
-        return not self.redis.exists(key)  # not done streaming if key exists
 
     def messages(self, channel='sse'):
         """
@@ -188,7 +189,6 @@ class ServerSentEventsBlueprint(Blueprint):
 
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
-
         try:
             while not self.done_streaming(channel):
                 pubsub_message = pubsub.get_message(timeout=timeout)
@@ -217,14 +217,13 @@ class ServerSentEventsBlueprint(Blueprint):
         :mailheader:`Last-Event-ID` headers in the HTTP request.
         Use a "channel" query parameter to stream events from a different
         channel than the default channel (which is "sse").
-
-        A client can be told to stop reconnecting using the HTTP 204 No Content response code,
-        according to the `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
         """
         channel = request.args.get('channel') or 'sse'
 
         if self.done_streaming(channel):
-            # Tell client to stop reconnecting
+            # A client can be told to stop reconnecting using the HTTP 204 No Content
+            # response code, according to the `server-sent events specification
+            # <https://www.w3.org/TR/eventsource/>`_.
             return current_app.response_class("", status=204)
 
         @stream_with_context
