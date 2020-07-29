@@ -183,8 +183,8 @@ class ServerSentEventsBlueprint(Blueprint):
             health_check = ":{}\n".format(health_check)
 
         timeout = current_app.config.get("SSE_TIMEOUT")
-        if (health_check or self.done_streaming(channel) is not None) and timeout is None:
-            timeout = 15.0  # timeout needed to do a health-check or check if done streaming
+        if timeout is None and (health_check or self.done_streaming(channel) is not None):
+            timeout = 15.0  # timeout is needed to do a health-check or check if done streaming
 
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
