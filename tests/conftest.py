@@ -1,6 +1,5 @@
 import pytest
 from flask import Flask
-import flask_sse
 
 
 @pytest.fixture
@@ -28,8 +27,3 @@ def mockredis(mocker):
     mocker.patch("flask_sse.StrictRedis", return_value=_mr)
     mocker.patch("flask_sse.StrictRedis.from_url", return_value=_mr)
     return _mr
-
-
-@pytest.fixture
-def mockpsmsgs(mocker):
-    return mocker.patch.object(flask_sse.ServerSentEventsBlueprint, "pubsub_messages")

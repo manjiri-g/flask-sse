@@ -46,6 +46,12 @@ class Message(object):
             d["retry"] = self.retry
         return d
 
+    def to_str(self):
+        """
+        Serialize this object as a server-sent block
+        """
+        return str(self)
+
     def __str__(self):
         """
         Serialize this object to a string, according to the `server-sent events
@@ -144,51 +150,59 @@ class ServerSentEventsBlueprint(Blueprint):
         msg_json = json.dumps(msg_dict)
         return self.redis.publish(channel=channel, message=msg_json)
 
-    @staticmethod
-    def pubsub_messages(pubsub, timeout=15.0):
+    def done_streaming(self, channel='sse'):
         """
-        Block (unless timeout=0.0) until message is published on subscribed channel.
-        Yield message or 'None' on timeout.
+        Done streaming on this channel if a redis key does not exist.
+        This functionality is enabled with SSE_REDIS_CHANNEL_KEY_PREFIX configuration.
         """
-        if timeout is None:
-            for pubsub_message in pubsub.listen():
-                yield pubsub_message
-        else:
-            while True:
-                pubsub_message = pubsub.get_message(timeout=timeout)
-                yield pubsub_message
+        prefix = current_app.config.get("SSE_REDIS_CHANNEL_KEY_PREFIX")
+        if prefix is None:
+            return None  # never done streaming
+
+        key = prefix + channel
+        return not self.redis.exists(key)  # not done streaming if key exists
 
     def messages(self, channel='sse'):
         """
-        A generator of :class:`~flask_sse.Message` objects from the given channel.
-
-        About SSE connection:
-        Stop reconnecting: See :meth:`stop_reconnecting`. Generator is not invoked.
-        Disconnect: This generator stops with ``StopIteration`` exception. Client may reconnect.
-        Health-check: Sends content which does not fire an event on the client if still connected
-          If client is not connected, this generator closed with ``GeneratorExit`` exception
+        A generator of streaming blocks from the given channel
+          Yields serialized :class:`~flask_sse.Message` objects published to the given channel.
+            See :meth:`publish`. This will fire an SSEvent.
+          Yields a health-check on timeout. This functionality is enabled with SSE_HEALTH_CHECK
+            configuration and is based on SSE_TIMEOUT configuration.
+          Yields a health-check when a "health-check" control message is received.
+            See :meth:`control`.
+          Note: a health-check does not fire an SSEvent.
+          Stops when :meth:`done_streaming` returns True. This check is performed periodically
+            based on SSE_TIMEOUT configuration.
+          Stops when a "disconnect" control message is received. See :meth:`control`.
         """
+        health_check = current_app.config.get("SSE_HEALTH_CHECK")
+        if health_check is not None:
+            # If the line starts with a U+003A COLON character (:), it will be ignored according
+            # to the `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
+            health_check = ":{}\n".format(health_check)
+
+        timeout = current_app.config.get("SSE_TIMEOUT")
+        if (health_check or self.done_streaming(channel) is not None) and timeout is None:
+            timeout = 15.0  # timeout needed to do a health-check or check if done streaming
+
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
 
-        # If the line starts with a U+003A COLON character (:) Ignore the line, according to the
-        # `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
-        health_check = ":Connection health-check\n"
-
         try:
-            for pubsub_message in self.pubsub_messages(pubsub):
+            while not self.done_streaming(channel):
+                pubsub_message = pubsub.get_message(timeout=timeout)
                 if pubsub_message is None:
-                    if self.stop_reconnecting(channel):
-                        break
-                    else:
+                    if health_check:
                         yield health_check
                 elif pubsub_message['type'] == 'message':  # ignore 'subscribe' 'unsubscribe'
                     msg_dict = json.loads(pubsub_message['data'])
                     command = msg_dict.get('sse-control')
                     if command is None:
-                        yield Message(**msg_dict)
+                        yield Message(**msg_dict).to_str()
                     elif command == 'health-check':
-                        yield health_check
+                        if health_check:
+                            yield health_check
                     elif command == 'disconnect':
                         break
         finally:
@@ -197,42 +211,26 @@ class ServerSentEventsBlueprint(Blueprint):
             except ConnectionError:
                 pass
 
-    def stop_reconnecting(self, channel='sse'):
-        """
-        Tell client to stop reconnecting if a redis key exists. This functionality is enabled
-        with SSE_REDIS_CHANNEL_KEY_PREFIX configuration.
-
-        Clients will reconnect if the connection is closed;
-        a client can be told to stop reconnecting using the HTTP 204 No Content response code,
-        according to the `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
-
-        Subclasses can override this to return True if the client should stop reconnecting
-        """
-        prefix = current_app.config.get("SSE_REDIS_CHANNEL_KEY_PREFIX")
-        if prefix is None:
-            return False
-
-        # stop reconnecting if key does not exist
-        key = prefix + channel
-        return not self.redis.exists(key)
-
     def stream(self):
         """
         A view function that streams server-sent events. Ignores any
         :mailheader:`Last-Event-ID` headers in the HTTP request.
         Use a "channel" query parameter to stream events from a different
         channel than the default channel (which is "sse").
+
+        A client can be told to stop reconnecting using the HTTP 204 No Content response code,
+        according to the `server-sent events specification <https://www.w3.org/TR/eventsource/>`_.
         """
         channel = request.args.get('channel') or 'sse'
 
-        # Tell client to stop reconnecting
-        if self.stop_reconnecting(channel):
+        if self.done_streaming(channel):
+            # Tell client to stop reconnecting
             return current_app.response_class("", status=204)
 
         @stream_with_context
         def generator():
             for message in self.messages(channel=channel):
-                yield str(message)
+                yield message
 
         return current_app.response_class(
             generator(),
