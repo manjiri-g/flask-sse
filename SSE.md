@@ -336,7 +336,8 @@ SSE connection state changes can be controlled by either the client or by server
 
 ## Appendix
 
-### Example
+### Usage
+Python server
 ```python
     from flask import Flask
     from flask_sse import msse
@@ -345,27 +346,20 @@ SSE connection state changes can be controlled by either the client or by server
     app.config["SSE_REDIS_URL"] = "redis://localhost"
     app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = ""
     app.config["SSE_HEALTH_CHECK"] = "HC"
+    app.config["SSE_TIMEOUT"] = 20.0
     app.register_blueprint(msse, url_prefix='/stream')
 ```
-To receive events on a webpage, use Javascript to connect to the event stream,
-like this:
-
+Javascript client
 ```javascript
     var source = new EventSource("{{ url_for('msse.stream') }}");
 ```
 
-### TCP
+### TCP tools
 ```
 lsof -i4tcp:6379,8080 -nP
 tcpdump -lnnA port 6379 or port 8080
 ```
-### app.config
-```
-app.config["SSE_REDIS_URL"] = "redis://localhost"
-app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = ""
-app.config["SSE_HEALTH_CHECK"] = "HC"
-```
-### redis-cli
+### redis-cli tools
 ```
 PUBLISH sse "{\"data\": \"ZDEFAULT\"}"
 PUBLISH sse "{\"data\": \"ZDATA\", \"type\": \"message\"}"
@@ -383,4 +377,6 @@ EXISTS sse
 PUBSUB CHANNELS
 PUBSUB NUMSUB sse
 CLIENT LIST TYPE PUBSUB
+
+MONITOR
 ```
