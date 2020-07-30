@@ -13,7 +13,7 @@ A retry mechanism is built into the SSE EventSource specification; the SSE clien
 ## Python Generator
 The SSE server subscribes to the Redis channel when it receives an HTTP request and unsubscribes when the response is closed. The Redis PUBSUB connection remains alive for the duration of the subscription. Streaming contents in Flask makes use of a Python generator.
 
-```
+```python
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
         for pubsub_message in pubsub.listen():
@@ -25,7 +25,7 @@ The SSE server subscribes to the Redis channel when it receives an HTTP request 
 ### GeneratorExit
 The SSE server must unsubscribe from the channel when this loop is terminated. For starters, right before the response is closed - e.g. tab is closed - the generator is closed. This corresponds to GeneratorExit exception which presents an opportunity to reclaim resources.
 
-```
+```python
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
         try:
@@ -39,7 +39,7 @@ The SSE server must unsubscribe from the channel when this loop is terminated. F
 ### StopIteration
 To handle the 'game over' scenario, the SSE server must actively decide to terminate the loop when no more messages are expected to be published on the channel. This also requires that the loop use `pubsub.get_message` with a `timeout`; because `pubsub.listen` will block indefinitely in this situation.
 
-```
+```python
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
         try:
@@ -56,7 +56,7 @@ To handle the 'game over' scenario, the SSE server must actively decide to termi
 ### Stop reconnecting
 Termination of the generator will trigger EventSource 'error' event and a reconnection attempt. In the 'game over' scenario, the SSE server tells the client to stop reconnecting with "204 NO CONTENT".
 
-```
+```python
         channel = request.args.get('channel') or 'sse'
 
         if self.done_streaming(channel):
@@ -75,7 +75,7 @@ Termination of the generator will trigger EventSource 'error' event and a reconn
 ### Connection health check
 Redis resources remain tied up while streaming even if the HTTP-side has disconnected if the server has no data to stream. Until then, the SSE server is not aware that the connection state has changed. This resource leak is avoided by performing a periodic health-check on the connection by sending a line that will be ignored by the EventSource engine because it begins with a colon ':'. If the `write` fails, the generator will be closed (`GeneratorExit`) giving it a chance to release Redis resources.
 
-```
+```python
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
         try:
@@ -92,7 +92,7 @@ Redis resources remain tied up while streaming even if the HTTP-side has disconn
 ## Control messages
 The application can wield more control over the generator by publishing a 'control' message that triggers immediate termination of loop or a health-check. (The application can also use EventSource events (i.e. data messages) for health-checking and/or telling the remote side to close the connection.)
 
-```
+```python
         pubsub = self.redis.pubsub()
         pubsub.subscribe(channel)
         health_check = ":Health-check\n"
@@ -123,7 +123,7 @@ Ultimate control over these behaviors comes from configuration parameters or sub
 ## Code
 Flask SSE Blueprint for connection and resource management and control: https://github.com/manjiri-g/flask-sse/tree/sse-manager
 
-```
+```python
     def done_streaming(self, channel='sse'):
         prefix = current_app.config.get("SSE_REDIS_CHANNEL_KEY_PREFIX")
         if prefix is None:
@@ -216,7 +216,7 @@ Figure 1. Publishing a message
 ## Establishing an SSE connection
 
 Connection initiated by client (JavaScript):
-```
+```javascript
 source = new EventSource("http://hostname/stream");
 ```
 
@@ -332,9 +332,27 @@ Figure 6. Server tells client to stop reconnecting
 
 ## Conclusion
 
-SSE connection state changes can be controlled by either the client or by server. Redis PUBSUB is a convenient method for implementing SSE using Flask. See https://github.com/manjiri-g/flask-sse/tree/sse-manager for flexible mechanisms to manage and control the SSE connection and Redis resources.
+SSE connection state changes can be controlled by either the client or by server. Redis PUBSUB is a convenient method for implementing SSE using Flask. See https://github.com/manjiri-g/flask-sse/tree/sse-manager for flexible mechanisms to manage and control the SSE connection and Redis resources using ``ManagedServerSentEventsBlueprint``.
 
 ## Appendix
+
+### Example
+```python
+    from flask import Flask
+    from flask_sse import msse
+
+    app = Flask(__name__)
+    app.config["SSE_REDIS_URL"] = "redis://localhost"
+    app.config["SSE_REDIS_CHANNEL_KEY_PREFIX"] = ""
+    app.config["SSE_HEALTH_CHECK"] = "HC"
+    app.register_blueprint(msse, url_prefix='/stream')
+```
+To receive events on a webpage, use Javascript to connect to the event stream,
+like this:
+
+```javascript
+    var source = new EventSource("{{ url_for('msse.stream') }}");
+```
 
 ### TCP
 ```

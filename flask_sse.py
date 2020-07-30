@@ -98,7 +98,7 @@ class Message(object):
         )
 
 
-class ServerSentEventsBaseBlueprint(Blueprint):
+class ServerSentEventsBlueprint(Blueprint):
     """
     A :class:`flask.Blueprint` subclass that knows how to publish, subscribe to,
     and stream server-sent events.
@@ -173,20 +173,20 @@ class ServerSentEventsBaseBlueprint(Blueprint):
         )
 
 
-ssebase = ServerSentEventsBaseBlueprint('ssebase', __name__)
+sse = ServerSentEventsBlueprint('sse', __name__)
 """
-An instance of :class:`~flask_sse.ServerSentEventsBaseBlueprint`
-that hooks up the :meth:`~flask_sse.ServerSentEventsBaseBlueprint.stream`
+An instance of :class:`~flask_sse.ServerSentEventsBlueprint`
+that hooks up the :meth:`~flask_sse.ServerSentEventsBlueprint.stream`
 method as a view function at the root of the blueprint. If you don't
 want to customize this blueprint at all, you can simply import and
 use this instance in your application.
 """
-ssebase.add_url_rule(rule="", endpoint="basestream", view_func=ssebase.stream)
+sse.add_url_rule(rule="", endpoint="stream", view_func=sse.stream)
 
 
-class ServerSentEventsBlueprint(ServerSentEventsBaseBlueprint):
+class ManagedServerSentEventsBlueprint(ServerSentEventsBlueprint):
     """
-    A :class:`flask_sse.ServerSentEventsBaseBlueprint` subclass that provides mechanisms to control
+    A :class:`flask_sse.ServerSentEventsBlueprint` subclass that provides mechanisms to control
     server-sent events stream and connection.
     """
     def done_streaming(self, channel='sse'):
@@ -290,12 +290,12 @@ class ServerSentEventsBlueprint(ServerSentEventsBaseBlueprint):
         )
 
 
-sse = ServerSentEventsBlueprint('sse', __name__)
+msse = ManagedServerSentEventsBlueprint('msse', __name__)
 """
-An instance of :class:`~flask_sse.ServerSentEventsBlueprint`
-that hooks up the :meth:`~flask_sse.ServerSentEventsBlueprint.stream`
+An instance of :class:`~flask_sse.ManagedServerSentEventsBlueprint`
+that hooks up the :meth:`~flask_sse.ManagedServerSentEventsBlueprint.stream`
 method as a view function at the root of the blueprint. If you don't
 want to customize this blueprint at all, you can simply import and
 use this instance in your application.
 """
-sse.add_url_rule(rule="", endpoint="stream", view_func=sse.stream)
+msse.add_url_rule(rule="", endpoint="stream", view_func=msse.stream)
