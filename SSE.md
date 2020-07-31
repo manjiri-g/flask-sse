@@ -209,7 +209,6 @@ A more detailed analysis of connection state changes is as follows.
            \  +--- messageN -----> | --- data: messageN ----------------> + event
             \                      |                                      :
              +---- messageN -----> | --- data: messageN ----------------> + event
-                                   |                                      :
 ```
 Figure 1. Publishing a message
 
@@ -258,7 +257,6 @@ Either the SSE client or the server can decide to close the connection.
                           |        message/timeout + --- TCP PSH -----------------------> | no event
                           | <-- UNSUBSCRIBE ------ + <-- TCP RST ------------------------ |(2)
                           |                        |                                      |
-
 ```
 Figure 3. Client disconnects
 
