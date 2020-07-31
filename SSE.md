@@ -284,7 +284,6 @@ Figure 3. Client disconnects
                           |                        |                                      |
                           |                        |                               ...... | retry connect
                           |                        |                                      |
-
 ```
 Figure 4. Server disconnects
 
@@ -311,7 +310,6 @@ Figure 4. Server disconnects
                           |                        |                                      |
                           |                        |                               ...... | retry connect
                           |                        |                                      |
-
 ```
 Figure 5. Server done streaming, disconnects
 
@@ -363,10 +361,10 @@ tcpdump -lnnA port 6379 or port 8080
 ```
 PUBLISH sse "{\"data\": \"ZDEFAULT\"}"
 PUBLISH sse "{\"data\": \"ZDATA\", \"type\": \"message\"}"
-publish sse "{\"data\": \"ZEVENTDATA\", \"type\": \"zevent\"}"
+PUBLISH sse "{\"data\": \"ZEVENTDATA\", \"type\": \"zevent\"}"
 
-publish sse "{\"sse-control\": \"health-check\"}"
-publish sse "{\"sse-control\": \"disconnect\"}"
+PUBLISH sse "{\"sse-control\": \"health-check\"}"
+PUBLISH sse "{\"sse-control\": \"disconnect\"}"
 
 SET sse keep-streaming
 DEL sse
